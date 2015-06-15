@@ -139,23 +139,19 @@ modFit$finalModel                               ## confusion matrix and OOB erro
 ```
 **Trial where we use SVD to keep 97% of the variance explained before RF classification** >>  Low accuracy
 ```{r, echo=T}
-origin_sc <- scale(reduced_tr[,-53])            ## scaling madatory before SVD. 
-svd1 <-svd(origin_sc)
+svd1 <- svd(scale(reduced_tr[,-53]))            ## scaling madatory before SVD. 
 sum(svd1$d[1:30]^2)/sum(svd1$d^2)               ## 30 first components over 52 --> > 97% variance
-
-tr_newbase_sc <- t(svd1$v) %*% t(origin_sc)     ## gives the transposed matrix of the components of the 1000 instances in the new base   (V )
-newbase_sc <- t(tr_newbase_sc)                  ## gives the actual matrix of the components of the 1000 instances in the new base, which orthogonal vectors are directed to the principal variance directions
-round(colSums(newbase_sc^2))                    ## actually shows the decrease of variance explained: the first columns of the training set in the new base (principal componets base) vary in a larger way
+approx1_30 <- svd1$u[,1:30] %*% diag(svd1$d[1:30]) %*% t(svd1$v[,1:30]) ## data approximation by dimension reduction from 52 to 30
 
 ```{r, echo=T,results='hide'}
-approx1_30 <- as.data.frame(newbase_sc[,1:30])
+approx1_30 <- as.data.frame(approx1_30)
 approx1_30$classe <- reduced_tr$classe
 
 set.seed(45323)  
 modFit <- train(classe ~ .,data=approx1_30,method="rf",prox=TRUE)  
 modFit
 ```{r, echo=T}
-modFit$finalModel               ## confusion matrix and oob error rate 21% !!! No. of variables tried at each split: 2
+modFit$finalModel               ## confusion matrix and oob error rate 15.3%  No. of variables tried at each split: 2
 ```
 **Final trial with an additional cross validation:** data partitionning and RF model creation
 ```{r, echo=T}
@@ -177,7 +173,7 @@ prediction <- predict(modFit,testing)   ## predicts on the test subset of the 30
 1-sum(prediction==testing$classe)/length(prediction)    ## check Out Of Sample error = 3.75%
 
 predict(modFit,usefull_test)            ## predicts on the actual test set
-
+answers <- predict(modFit,usefull_test)
 
 ```{r, echo=F,results='hide'}
 tr_cor <- cor(training[,-53])
@@ -196,7 +192,7 @@ predict(modFit_R,usefull_test)
 
 ```{r, echo=F,results='hide',fig.show='hide'}
 
-answers <- predict(modFit_R,usefull_test)
+
 
 pml_write_files = function(x){
   n = length(x)

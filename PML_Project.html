@@ -122,9 +122,9 @@ modFit &lt;- train(classe ~ ., data = reduced_tr, method = &quot;rf&quot;, prox 
 ## Resampling results across tuning parameters:
 ## 
 ##   mtry  Accuracy   Kappa      Accuracy SD  Kappa SD  
-##    2    0.8542684  0.8150680  0.01680921   0.02153734
-##   27    0.8555671  0.8167299  0.01696707   0.02183433
-##   52    0.8392749  0.7961521  0.02462697   0.03140275
+##    2    0.8546882  0.8155996  0.01702792   0.02181903
+##   27    0.8570561  0.8186218  0.01808006   0.02317263
+##   52    0.8410408  0.7983811  0.02240029   0.02852897
 ## 
 ## Accuracy was used to select the optimal model using  the largest value.
 ## The final value used for the model was mtry = 27.</code></pre>
@@ -218,24 +218,17 @@ modFit</code></pre>
 ## D   3   2  15 141   3  0.14024390
 ## E   0   9   7   3 152  0.11111111</code></pre>
 <p><strong>Trial where we use SVD to keep 97% of the variance explained before RF classification</strong> &gt;&gt; Low accuracy</p>
-<pre class="r"><code>origin_sc &lt;- scale(reduced_tr[,-53])            ## scaling madatory before SVD. 
-svd1 &lt;-svd(origin_sc)
+<pre class="r"><code>svd1 &lt;- svd(scale(reduced_tr[,-53]))            ## scaling madatory before SVD. 
 sum(svd1$d[1:30]^2)/sum(svd1$d^2)               ## 30 first components over 52 --&gt; &gt; 97% variance</code></pre>
 <pre><code>## [1] 0.9730481</code></pre>
-<pre class="r"><code>tr_newbase_sc &lt;- t(svd1$v) %*% t(origin_sc)     ## gives the transposed matrix of the components of the 1000 instances in the new base   (V )
-newbase_sc &lt;- t(tr_newbase_sc)                  ## gives the actual matrix of the components of the 1000 instances in the new base, which orthogonal vectors are directed to the principal variance directions
-round(colSums(newbase_sc^2))                    ## actually shows the decrease of variance explained: the first columns of the training set in the new base (principal componets base) vary in a larger way</code></pre>
-<pre><code>##  [1] 8465 8118 4617 3883 3108 2389 2114 2024 1742 1621 1447 1270 1189 1007
-## [15]  874  831  719  679  652  515  457  422  404  353  329  300  284  261
-## [29]  246  227  201  165  142  125  110   91   84   77   59   53   49   43
-## [43]   35   33   29   26   25   19   15   12    5    2</code></pre>
-<pre class="r"><code>approx1_30 &lt;- as.data.frame(newbase_sc[,1:30])
+<pre class="r"><code>approx1_30 &lt;- svd1$u[,1:30] %*% diag(svd1$d[1:30]) %*% t(svd1$v[,1:30]) ## data approximation by dimension reduction from 52 to 30</code></pre>
+<pre class="r"><code>approx1_30 &lt;- as.data.frame(approx1_30)
 approx1_30$classe &lt;- reduced_tr$classe
 
 set.seed(45323)  
 modFit &lt;- train(classe ~ .,data=approx1_30,method=&quot;rf&quot;,prox=TRUE)  
 modFit</code></pre>
-<pre class="r"><code>modFit$finalModel               ## confusion matrix and oob error rate 21% !!! No. of variables tried at each split: 2</code></pre>
+<pre class="r"><code>modFit$finalModel               ## confusion matrix and oob error rate 15.3%  No. of variables tried at each split: 2</code></pre>
 <pre><code>## 
 ## Call:
 ##  randomForest(x = x, y = y, mtry = param$mtry, proximity = TRUE) 
@@ -243,14 +236,14 @@ modFit</code></pre>
 ##                      Number of trees: 500
 ## No. of variables tried at each split: 2
 ## 
-##         OOB estimate of  error rate: 21%
+##         OOB estimate of  error rate: 15.3%
 ## Confusion matrix:
 ##     A   B   C   D   E class.error
-## A 260   8   5   9   1  0.08127208
-## B  24 162  13   3   7  0.22488038
-## C  15  23 119   9   7  0.31213873
-## D   4   7  28 117   8  0.28658537
-## E   6  20   9   4 132  0.22807018</code></pre>
+## A 265   5   4   7   2  0.06360424
+## B  19 169  14   1   6  0.19138756
+## C   8  11 146   8   0  0.15606936
+## D   5   2  22 128   7  0.21951220
+## E   2  13  11   6 139  0.18713450</code></pre>
 <p><strong>Final trial with an additional cross validation:</strong> data partitionning and RF model creation</p>
 <pre class="r"><code>set.seed(45323) 
 sam3 &lt;- sample(rownames(usefull_train),3000)
@@ -276,9 +269,9 @@ modFit</code></pre>
 ## Resampling results across tuning parameters:
 ## 
 ##   mtry  Accuracy   Kappa      Accuracy SD  Kappa SD  
-##    2    0.9245273  0.9048420  0.010807777  0.01366157
-##   27    0.9286216  0.9099831  0.009640084  0.01218292
-##   52    0.9162224  0.8943551  0.011443117  0.01444210
+##    2    0.9247287  0.9050964  0.01050299   0.01324527
+##   27    0.9286254  0.9099917  0.01008063   0.01273447
+##   52    0.9168604  0.8951533  0.01135271   0.01434485
 ## 
 ## Accuracy was used to select the optimal model using  the largest value.
 ## The final value used for the model was mtry = 27.</code></pre>
@@ -305,6 +298,7 @@ modFit</code></pre>
 <pre class="r"><code>predict(modFit,usefull_test)            ## predicts on the actual test set</code></pre>
 <pre><code>##  [1] B A B A A E D B A A B C B A E E A B B B
 ## Levels: A B C D E</code></pre>
+<pre class="r"><code>answers &lt;- predict(modFit,usefull_test)</code></pre>
 </div>
 <div id="appendix-note" class="section level3">
 <h3>Appendix note</h3>
