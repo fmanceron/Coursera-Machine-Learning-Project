@@ -1,0 +1,232 @@
+---
+title: "PML project"
+author: "Frederic Manceron"
+date: "Monday, June 15, 2015"
+output: html_document
+---
+opts_chunk$set(cache=True)  
+
+### Executive summary
+
+The goal of this project is to predict the "manner"  in which six persons did a Weight Lifting Exercise (See foot note).
+
+The training set is composed of 19622 instances, each being a vector or 159 variables + a class ranging from "A" to "E" defining the actual "manner". The test set only contains 20 instances, whose class should be predicted.
+
+The Random Forest (RF) of the Caret R library has been used, as it's a powerfull algorithm with many built-in functions and proven acccuracy. It comprises bootstrap sampling, variables resampling, AND an embedded CrossValidation (CV) trough the "out of bag" (OOB) data mechanism, which takes about one third of each tree as test data, and thus permits to assess the classification error rate.
+
+As the number of instances and the number of variables are high, different ways were taken to try to reduce them, for computation time purpose. Eventually, it happens that selecting the 52 relevant features and taking a random subsample of 3000 instances, subsplit into 75% training and 25% test data, in order to check the OOB, gives a suffcient accuracy to predict the 20 test instances. 
+
+For the project, different number of instances, and different approches to components reduction were tested: COV to remove the higly correlated features, or PCA, SVD, and Variable Importance approach,to get rid of the least significant features. PCA and SVD give poor results as preprocessing of RF (good explanations were found [here][1]). COV and Variable Importance method don't provide significant advantage, as RF also randomly selects subsets of variables in its tree construction.
+
+[1]: http://stackoverflow.com/questions/26742624/using-pca-before-classification "here"
+
+Due to the large number of features, it wasn't felt necessary to exploit any paricular plot.
+
+### Data Processing
+
+**Loading and discovering the data**            (str, head, colnames, ... not shown)
+
+```{r, echo=FALSE}
+wdir<-'c:/users/frederic/dossiers/pro fred/formations/bigd/Coursera Data Science John Hopkins/Practical Machine Learning/Project'
+
+```{r, echo=TRUE}
+## setInternet2(use = TRUE)
+## download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv','pml-training.csv')
+trdata <- read.csv('pml-training.csv',header = T,stringsAsFactors = FALSE)
+which(colnames(trdata) == "classe")                     ## classe (A to E) is the last column (160)
+
+```{r, echo=F,results='hide'}
+str(trdata)
+head(trdata[,160],100); tail(trdata[,160],100)
+colnames(trdata)
+
+
+## library(xlsx)
+## write.xlsx(trdata[1:200,], paste("file",200,".xlsx", sep=""),row.names=F)  ## to look at the data
+
+```{r, echo=TRUE}
+## download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv','pml-testing.csv')
+testdata <- read.csv('pml-testing.csv',header = T)
+
+```{r, echo=F,results='hide'}
+colnames(testdata)
+str(testdata)
+
+```
+
+The following tests prove that the same 100 variables are missing for the 20 instances of the test set.
+
+```{r, echo=T,results='hide'}
+for (i in 1:20) print(sum(is.na(testdata[i,])))                         ## allways 100 missing data
+for (i in 1:20) print(sum(is.na(testdata[1,]) & is.na(testdata[i,])))   ## alwways the same 100 
+
+```
+**Data selection (processing code):** the missing variables in the test set, as  the "identifier" variables of the 7 first column,  will not be used for prediction. They can be removed from the training set, leaving 53 remaining variables including the "classe" (53rd column).
+```{r, echo=T,results='hide'}
+which(is.na(testdata[1,]))                              ## locates the missing variables (column number)
+usefull_col <- colnames(trdata[,-c(1:7,which(is.na(testdata[1,])))])   ## selects the columns for the features with no missing data and no Id variables
+
+usefull_train <- trdata[,usefull_col]                   ## the actual training data
+usefull_train$classe <- as.factor(usefull_train$classe )
+
+usefull_test <- testdata[,usefull_col[1:52]]            ## test data, last column (class or problem_id) removed
+
+```{r, echo=F,results='hide'}
+table(usefull_train$classe)
+colnames(usefull_test)  ## check
+```
+### Data analysis  
+Start with a random subset of 1000 instances of the training set
+```{r, echo=TRUE,results='hide',warning = F, message = F, error= T, tidy=T}
+## enable multi-core processing
+library(doParallel)
+detectCores()
+cl <- makeCluster(detectCores()-2)                                      ## keep 2 free CPU
+registerDoParallel(cl)
+
+library(caret)
+
+set.seed(45323)                                                         ## to be reproducible
+sam <- sample(rownames(usefull_train),1000)
+reduced_tr <- usefull_train[sam,]
+
+```{r, echo=F,results='hide'}
+table(reduced_tr$classe)
+str(reduced_tr)         ## check
+sum(is.na(reduced_tr))  ## no more NAs
+nzv <- nearZeroVar(reduced_tr,saveMetrics=T)  ## no near zero variance 
+```
+**Fit a model with all 52 features**
+```{r, echo=T,results='hide',warning = F, message = F, error= T, tidy=T}
+set.seed(45323)  
+modFit <- train(classe ~ .,data=reduced_tr,method="rf",prox=TRUE)       ## computes the proximity matrix
+```{r, echo=T,}
+modFit
+modFit$finalModel                                       ## confusion matrix and OOB error rate 9.4%
+varImp(modFit)
+```{r, echo=F,results='hide'}
+modFit$coefnames
+modFit$times
+modFit$resample
+
+```
+**Trial where only the 50% most important features are kept:** No degradation of the error rate.
+
+```{r, echo=T,results='hide'}
+imp <- sort(varImp(modFit)$importance[,1],decr=T)       ## sort the column numbers of the most important variables
+tr_imp <- reduced_tr[,which(varImp(modFit)$importance > median(imp))] ## keep those over the median
+tr_imp$classe <- reduced_tr$classe                      ## add the "classe" variable for the model
+
+set.seed(45323)  
+modFit <- train(classe ~ .,data=tr_imp,method="rf",prox=TRUE)  
+modFit
+```{r, echo=T,}
+modFit$finalModel                                       ## confusion matrix and OOB error rate 9.1%
+```
+**Trial where 11 correlated features are removed:** small degradation of the error rate.
+
+```{r, echo=TRUE}
+tr_cor <- cor(reduced_tr[,-53])                 ## correlation matrix of the 52 features for the 1000 obs
+highlycorr <-findCorrelation(tr_cor,cutoff=.8)  ##  returns a vector of integers corresponding to columns to remove to reduce pair-wise correlations
+reduced_trx <- reduced_tr[,-highlycorr]         ## 11 features removed
+
+```{r, echo=T,results='hide'}
+set.seed(45323)  
+modFit <- train(classe ~ .,data=reduced_trx,method="rf",prox=TRUE)  
+modFit
+```{r, echo=T}
+modFit$finalModel                               ## confusion matrix and OOB error rate 10.2%
+```
+**Trial where we use SVD to keep 97% of the variance explained before RF classification** >>  Low accuracy
+```{r, echo=T}
+origin_sc <- scale(reduced_tr[,-53])            ## scaling madatory before SVD. 
+svd1 <-svd(origin_sc)
+sum(svd1$d[1:30]^2)/sum(svd1$d^2)               ## 30 first components over 52 --> > 97% variance
+
+tr_newbase_sc <- t(svd1$v) %*% t(origin_sc)     ## gives the transposed matrix of the components of the 1000 instances in the new base   (V )
+newbase_sc <- t(tr_newbase_sc)                  ## gives the actual matrix of the components of the 1000 instances in the new base, which orthogonal vectors are directed to the principal variance directions
+round(colSums(newbase_sc^2))                    ## actually shows the decrease of variance explained: the first columns of the training set in the new base (principal componets base) vary in a larger way
+
+```{r, echo=T,results='hide'}
+approx1_30 <- as.data.frame(newbase_sc[,1:30])
+approx1_30$classe <- reduced_tr$classe
+
+set.seed(45323)  
+modFit <- train(classe ~ .,data=approx1_30,method="rf",prox=TRUE)  
+modFit
+```{r, echo=T}
+modFit$finalModel               ## confusion matrix and oob error rate 21% !!! No. of variables tried at each split: 2
+```
+**Final trial with an additional cross validation:** data partitionning and RF model creation
+```{r, echo=T}
+set.seed(45323) 
+sam3 <- sample(rownames(usefull_train),3000)
+reduced_tr3 <- usefull_train[sam3,]
+intrain <- createDataPartition(reduced_tr3$classe,p=0.75,list=F)
+training <- reduced_tr3[intrain ,]
+testing <- reduced_tr3[-intrain ,]
+
+set.seed(45323)  
+modFit <- train(classe ~ .,data=training,method="rf",prox=TRUE)  
+modFit
+modFit$finalModel                       ## confusion matrix and OOB error rate 4.84% 
+```
+**Final trial with an additional cross validation:**  with a random subset of 3000 instances of the training set, confirming the OOB error rate found by the RF alorithm on the test subset of this sampled training set, then on the 20 instances of the real test set.
+```{r, echo=T}
+prediction <- predict(modFit,testing)   ## predicts on the test subset of the 3000 insatnces training sample
+1-sum(prediction==testing$classe)/length(prediction)    ## check Out Of Sample error = 3.75%
+
+predict(modFit,usefull_test)            ## predicts on the actual test set
+
+
+```{r, echo=F,results='hide'}
+tr_cor <- cor(training[,-53])
+highlycorr <-findCorrelation(tr_cor,cutoff=0.8) 
+reduced_training <- training[,-highlycorr]  ## 9 features removed
+
+set.seed(45323)  
+modFit_R <- train(classe ~ .,data=reduced_training ,method="rf",prox=TRUE)  
+modFit_R
+modFit_R$finalModel     ## confusion matrix and oob error rate 5.59% 
+
+prediction <- predict(modFit_R,testing)
+1-sum(prediction==testing$classe)/length(prediction)  ## oos error = 5.49%
+
+predict(modFit_R,usefull_test)
+
+```{r, echo=F,results='hide',fig.show='hide'}
+
+answers <- predict(modFit_R,usefull_test)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+## then create a folder where you want the files to be written. Set that to be your working directory and run:
+ 
+pml_write_files(answers)
+
+
+library(ggplot2)
+qplot(pitch_forearm  ,roll_forearm   ,data=usefull_train,col=classe)
+qplot(roll_belt,pitch_forearm,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+qplot(roll_belt ,pitch_belt ,data=training,col=classe)
+qplot(magnet_dumbbell_y,accel_forearm_z,data=training,col=classe)
+qplot(roll_belt,yaw_belt ,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+qplot(gyros_belt_z,accel_forearm_z,data=training,col=classe)
+
+```
+### Appendix note  
+This project is based on a work performed by *Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks.  H.*: [Qualitative Activity Recognition of Weight Lifting Exercises](http://groupware.les.inf.puc-rio.br/work.jsf?p1=11201). 
+
+Six participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), or corresponding to common mistakes (classes B to E).
+
+
